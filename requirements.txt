@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pandas
+numpy
+pgeocode
+pydantic
+python-multipart
+mangum

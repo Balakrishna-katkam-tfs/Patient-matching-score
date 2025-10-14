@@ -1,0 +1,28 @@
+service: patient-matching-api
+
+provider:
+  name: aws
+  runtime: python3.9
+  region: us-east-1
+  timeout: 30
+  memorySize: 1024
+
+functions:
+  api:
+    handler: main.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+      - http:
+          path: /
+          method: ANY
+          cors: true
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: true
