@@ -6,6 +6,11 @@ provider:
   region: us-east-1
   timeout: 30
   memorySize: 1024
+  environment:
+    USE_DOCUDB: true
+    DOCUDB_CONNECTION_STRING: ${env:DOCUDB_CONNECTION_STRING}
+    DOCUDB_DATABASE: ${env:DOCUDB_DATABASE, 'patient_db'}
+    DOCUDB_COLLECTION: ${env:DOCUDB_COLLECTION, 'patients'}
 
 functions:
   api:

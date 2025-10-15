@@ -6,3 +6,7 @@ pgeocode
 pydantic
 python-multipart
 mangum
+pymongo
+dnspython
+python-dotenv
+boto3

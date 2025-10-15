@@ -43,6 +43,10 @@ Thumbs.db
 # Unwanted folder
 unwanted/
 
+# Environment files
+*.env
+!.env.example
+
 # Large data files (optional - comment out if you want to include them)
 # *.csv
 # *.parquet
