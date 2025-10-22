@@ -8,7 +8,7 @@ from ..data.loader import data_loader
 logger = logging.getLogger(__name__)
 
 async def filter_patients_async(filters: Dict, top_k: Optional[int] = None) -> List[Dict]:
-    """Async patient filtering with batch processing"""
+    """Async patient filtering with memory optimization"""
     df, _ = data_loader.get_datasets_sync()
     filtered = df.clone()
     

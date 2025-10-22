@@ -10,21 +10,19 @@ from ..utils.helpers import safe_date
 async def compute_score_batch(
     patients: List[Dict[str, Any]], 
     site_zip_codes: List[str] = None,
-    batch_size: int = 1000
+    batch_size: int = 500,
+    max_concurrent: int = 100
 ) -> List[Dict[str, Any]]:
-    """Process patients in batches for better performance"""
-    results = []
+    """Process patients in optimized batches with concurrency control"""
+    semaphore = asyncio.Semaphore(max_concurrent)
     
-    for i in range(0, len(patients), batch_size):
-        batch = patients[i:i + batch_size]
-        batch_tasks = [
-            compute_score_with_breakdown_async(patient, site_zip_codes)
-            for patient in batch
-        ]
-        batch_results = await asyncio.gather(*batch_tasks)
-        results.extend(batch_results)
+    async def process_with_semaphore(patient):
+        async with semaphore:
+            return await compute_score_with_breakdown_async(patient, site_zip_codes)
     
-    return results
+    # Process all patients concurrently with semaphore control
+    tasks = [process_with_semaphore(patient) for patient in patients]
+    return await asyncio.gather(*tasks, return_exceptions=True)
 
 # Cache merged_df at module level to avoid repeated calls
 _cached_merged_df = None

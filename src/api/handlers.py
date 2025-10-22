@@ -12,8 +12,13 @@ from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(title=settings.API_TITLE, version=settings.API_VERSION)
+# Initialize FastAPI app with performance optimizations
+app = FastAPI(
+    title=settings.API_TITLE, 
+    version=settings.API_VERSION,
+    docs_url="/docs",  # Enable docs for testing
+    redoc_url="/redoc"  # Enable redoc for testing
+)
 
 @app.on_event("startup")
 async def startup_event():
