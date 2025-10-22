@@ -1,7 +1,6 @@
-"""Main entry point for async Patient Matching API"""
+"""Main entry point for Patient Matching API"""
 import logging
 import uvicorn
-from mangum import Mangum
 from src.api.handlers import app
 from src.config.settings import settings
 
@@ -11,14 +10,11 @@ logging.basicConfig(
     format=settings.LOG_FORMAT
 )
 
-# Lambda handler
-handler = Mangum(app)
-
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host="127.0.0.1",
+        port=8080,
         reload=True,
         log_level=settings.LOG_LEVEL.lower()
     )

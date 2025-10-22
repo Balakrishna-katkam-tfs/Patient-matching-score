@@ -1,12 +1,9 @@
 fastapi
 uvicorn
-pandas
+polars
 numpy
 pgeocode
 pydantic
 python-multipart
-mangum
-pymongo
-dnspython
 python-dotenv
-boto3
+rapidfuzz

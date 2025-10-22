@@ -3,9 +3,9 @@ from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 
 class QueryRequest(BaseModel):
-    query: str
+    query: Optional[str] = None
     site_zip_codes: List[str] = []
-    top_k: int = 50
+    top_k: Optional[int] = None  # None = return all results
 
 class ScoreBreakdown(BaseModel):
     criterion: str

@@ -33,14 +33,21 @@ async def filter_patients_async(filters: Dict, top_k: Optional[int] = None) -> L
     for task in filter_tasks:
         filtered = await task if asyncio.iscoroutine(task) else task
     
-    # Remove duplicates by keeping highest business_score per patient
-    filtered = (
-        filtered.sort("business_score", descending=True)
-        .group_by("PATIENT_ID")
-        .first()
-    )
+    # Check for duplicates and optionally deduplicate
+    unique_patients = filtered.select("PATIENT_ID").n_unique()
+    total_records = filtered.shape[0]
     
-    logger.info(f"After deduplication: {filtered.shape[0]} unique patients")
+    if unique_patients < total_records:
+        logger.info(f"Found {total_records - unique_patients} duplicate patient records")
+        # Remove duplicates by keeping highest business_score per patient
+        filtered = (
+            filtered.sort("business_score", descending=True)
+            .group_by("PATIENT_ID")
+            .first()
+        )
+        logger.info(f"After deduplication: {filtered.shape[0]} unique patients")
+    else:
+        logger.info(f"No duplicates found: {filtered.shape[0]} unique patients")
     
     # Query-specific normalization
     if filtered.shape[0] > 0:

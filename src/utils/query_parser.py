@@ -8,9 +8,15 @@ from ..data.loader import data_loader
 
 logger = logging.getLogger(__name__)
 
-def parse_query(query: str) -> Dict:
+def parse_query(query: str = None) -> Dict:
     """Parse natural language query into filters"""
     filters = {}
+    
+    # Handle empty/null query - return empty filters for zip-code-only queries
+    if not query or query.strip() == "":
+        logger.info("Empty query - returning all patients for zip code filtering")
+        return filters
+        
     logger.info(f"Parsing query: {query}")
 
     sex_match = re.search(r"(Female|Male)", query, re.IGNORECASE)

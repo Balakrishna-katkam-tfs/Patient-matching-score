@@ -40,8 +40,9 @@ Thumbs.db
 # Logs
 *.log
 
-# Unwanted folder
+# Unwanted folders
 unwanted/
+new_schema_system/
 
 # Environment files
 *.env

@@ -10,7 +10,7 @@ from ..utils.helpers import safe_date
 async def compute_score_batch(
     patients: List[Dict[str, Any]], 
     site_zip_codes: List[str] = None,
-    batch_size: int = 100
+    batch_size: int = 1000
 ) -> List[Dict[str, Any]]:
     """Process patients in batches for better performance"""
     results = []
@@ -26,15 +26,20 @@ async def compute_score_batch(
     
     return results
 
+# Cache merged_df at module level to avoid repeated calls
+_cached_merged_df = None
+
 async def compute_score_with_breakdown_async(
     row: Dict[str, Any], 
     site_zip_codes: List[str] = None
 ) -> Dict[str, Any]:
     """Async version of score computation"""
-    _, merged_df = data_loader.get_datasets_sync()
+    global _cached_merged_df
+    if _cached_merged_df is None:
+        _, _cached_merged_df = data_loader.get_datasets_sync()
     
     pid = row.get("PATIENT_ID")
-    patient_raw = merged_df.filter(pl.col("PATIENT_ID") == pid)
+    patient_raw = _cached_merged_df.filter(pl.col("PATIENT_ID") == pid)
     breakdown = []
     score = 0
     today = datetime.today()
@@ -74,13 +79,27 @@ async def compute_score_with_breakdown_async(
     # === 2. PPD SCREENING ===
     activities = patient_raw.select("ACTIVITY_CATEGORY").to_series().drop_nulls().unique().to_list()
     
-    if "QUALIFIED RESPONDENTS" in activities:
+    # Get dates for each activity type
+    released_dates = patient_raw.filter(
+        pl.col("ACTIVITY_CATEGORY") == "RELEASED"
+    ).select("ACTIVITY_DATE").to_series().drop_nulls().to_list()
+    
+    respondents_dates = patient_raw.filter(
+        pl.col("ACTIVITY_CATEGORY") == "RESPONDENTS"
+    ).select("ACTIVITY_DATE").to_series().drop_nulls().to_list()
+    
+    if "RELEASED" in activities:
+        released_date = released_dates[-1] if released_dates else "unknown date"
+        pts = 40
+        reason = f"Found 'RELEASED' activity ({released_date}) → 40 points"
+    elif "QUALIFIED RESPONDENTS" in activities:
         qualified_date = qualified_dates[-1] if qualified_dates else "unknown date"
         pts = 30
         reason = f"Found 'QUALIFIED RESPONDENTS' activity ({qualified_date}) → 30 points"
     elif "RESPONDENTS" in activities:
+        respondents_date = respondents_dates[-1] if respondents_dates else "unknown date"
         pts = 20
-        reason = "Found 'RESPONDENTS' activity only → 20 points"
+        reason = f"Found 'RESPONDENTS' activity ({respondents_date}) → 20 points"
     else:
         pts = 0
         reason = "No PPD screening record found → 0 points"
@@ -89,11 +108,44 @@ async def compute_score_with_breakdown_async(
     breakdown.append({"criterion": "PPD Screening", "reason": reason, "points": pts})
     
     # === 3. SIMILAR STUDIES ===
-    indications = patient_raw.select("INDICATION_NAME").to_series().drop_nulls().unique().to_list()
-    study_count = len(indications)
-    pts = study_count * 20
-    indication_list = str(indications[:3]) if len(indications) <= 3 else str(indications[:3])[:-1] + f", +{len(indications)-3} more]"
-    reason = f"{study_count} unique indication(s): {indication_list} → {pts} points"
+    # Priority-based scoring for indications based on activity type
+    indication_scores = {}
+    
+    # Get indications for each activity type with priority scoring
+    released_indications = patient_raw.filter(
+        pl.col("ACTIVITY_CATEGORY") == "RELEASED"
+    ).select("INDICATION_NAME").to_series().drop_nulls().unique().to_list()
+    
+    qualified_indications = patient_raw.filter(
+        pl.col("ACTIVITY_CATEGORY") == "QUALIFIED RESPONDENTS"
+    ).select("INDICATION_NAME").to_series().drop_nulls().unique().to_list()
+    
+    respondent_indications = patient_raw.filter(
+        pl.col("ACTIVITY_CATEGORY") == "RESPONDENTS"
+    ).select("INDICATION_NAME").to_series().drop_nulls().unique().to_list()
+    
+    # Score each indication based on highest priority activity
+    for indication in released_indications:
+        indication_scores[indication] = max(indication_scores.get(indication, 0), 40)
+    
+    for indication in qualified_indications:
+        indication_scores[indication] = max(indication_scores.get(indication, 0), 30)
+    
+    for indication in respondent_indications:
+        indication_scores[indication] = max(indication_scores.get(indication, 0), 20)
+    
+    # Calculate total points and build reason
+    pts = sum(indication_scores.values())
+    study_count = len(indication_scores)
+    
+    if study_count > 0:
+        indication_list = list(indication_scores.keys())[:3]
+        if len(indication_scores) <= 3:
+            reason = f"{study_count} indication(s) with priority scoring: {indication_list} → {pts} points"
+        else:
+            reason = f"{study_count} indication(s) with priority scoring: {indication_list}, +{len(indication_scores)-3} more → {pts} points"
+    else:
+        reason = "0 indication(s) found → 0 points"
     
     score += pts
     breakdown.append({"criterion": "Similar Studies", "reason": reason, "points": pts})
@@ -104,10 +156,17 @@ async def compute_score_with_breakdown_async(
     
     if site_zip_codes:
         if patient_zip:
-            distance = await distance_calculator.calculate_closest_distance(
-                str(patient_zip), site_zip_codes
-            )
-            if distance < 10:
+            # Quick exact match check first
+            if str(patient_zip) in site_zip_codes:
+                distance = 0.0
+            else:
+                distance = await distance_calculator.calculate_closest_distance(
+                    str(patient_zip), site_zip_codes
+                )
+            if distance == 0.0:
+                pts = 20
+                reason = f"Patient ZIP {patient_zip}: Distance = {distance:.1f}km to closest site → 20 points (Exact match)"
+            elif distance < 10:
                 pts = 20
                 reason = f"Patient ZIP {patient_zip}: Distance = {distance:.1f}km to closest site → 20 points (Very close)"
             elif distance <= 50:
@@ -160,12 +219,10 @@ async def compute_score_with_breakdown_async(
     score += pts
     breakdown.append({"criterion": "Past Qualification", "reason": reason, "points": pts})
     
-    # Normalize score
-    normalized_score = min(1.0, score / 200.0)
-    
+    # Return raw score - normalization handled in handlers.py
     return {
         "total_business_score": score,
-        "business_score_normalized": round(normalized_score, 4),
-        "business_score_percent": round(normalized_score * 100, 2),
+        "business_score_normalized": 0,  # Will be calculated in handlers.py
+        "business_score_percent": 0,     # Will be calculated in handlers.py
         "breakdown": breakdown
     }

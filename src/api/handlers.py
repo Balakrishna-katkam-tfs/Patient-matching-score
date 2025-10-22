@@ -23,9 +23,6 @@ async def startup_event():
     # Load datasets
     await data_loader.load_datasets()
     
-    # Initialize distance calculator
-    await distance_calculator.initialize()
-    
     logger.info("✅ API startup complete")
 
 @app.post("/query", response_model=QueryResponse)
@@ -43,27 +40,48 @@ async def query_patients(request: QueryRequest):
                 returned_patients=0
             )
         
-        # Get total matching patients count before limiting
+        # Get ALL matching patients (no limit yet)
         all_matching_patients = await filter_patients_async(filters, top_k=None)
         total_matching_patients = len(all_matching_patients)
         
-        # Get limited results
-        patients = await filter_patients_async(filters, request.top_k)
-        
-        if not patients:
+        if not all_matching_patients:
             return QueryResponse(
                 patients=[],
                 total_matching_patients=0,
                 returned_patients=0
             )
         
-        # Compute scores in batches
-        scored_patients = await compute_score_batch(patients, request.site_zip_codes)
+        # Smart limiting: Score enough candidates to find best matches
+        # Need to score more candidates to account for distance bonuses changing rankings
+        max_score_candidates = 5000 if request.top_k is None else min(request.top_k * 50, 10000)
         
-        # Build results
+        # Use provided top_k or return all results
+        effective_top_k = request.top_k
+        
+        # Pre-sort by base business_score and take top candidates
+        all_matching_patients.sort(key=lambda x: x.get("business_score", 0), reverse=True)
+        candidates_to_score = all_matching_patients[:max_score_candidates]
+        
+        logger.info(f"Scoring {len(candidates_to_score)} top candidates (from {total_matching_patients} total)")
+        
+        # Compute scores for selected candidates
+        scored_patients = await compute_score_batch(candidates_to_score, request.site_zip_codes)
+        
+        # Combine candidates with their new scores
+        for i, patient in enumerate(candidates_to_score):
+            patient["_new_score"] = scored_patients[i]["total_business_score"]
+            patient["_score_details"] = scored_patients[i]
+        
+        # Sort by NEW scores
+        candidates_to_score.sort(key=lambda x: x["_new_score"], reverse=True)
+        
+        # Apply effective top_k limit if specified
+        patients = candidates_to_score[:effective_top_k] if effective_top_k else candidates_to_score
+        
+        # Build results using pre-calculated scores
         results = []
-        for i, p in enumerate(patients):
-            score_details = scored_patients[i]
+        for p in patients:
+            score_details = p["_score_details"]
             results.append({
                 "patient_id": str(p["PATIENT_ID"]),
                 "age": p.get("age"),
@@ -72,7 +90,7 @@ async def query_patients(request: QueryRequest):
                 "indication": p.get("indication"),
                 "latest_milestone": p.get("latest_milestone"),
                 "score_details": score_details,
-                "_sort_score": score_details["total_business_score"]
+                "_sort_score": p["_new_score"]
             })
         
         # Sort by newly calculated scores
@@ -124,3 +142,17 @@ def get_available_conditions():
     except Exception as e:
         logger.error(f"Error getting conditions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/zip-query", response_model=QueryResponse)
+async def query_by_zip_only(request: dict):
+    """Query patients by zip code only - simplified endpoint"""
+    site_zip_codes = request.get("site_zip_codes", [])
+    top_k = request.get("top_k")  # None by default
+    
+    query_request = QueryRequest(
+        query=None,
+        site_zip_codes=site_zip_codes,
+        top_k=top_k
+    )
+    
+    return await query_patients(query_request)
